@@ -1,0 +1,150 @@
+x-otel-common-env: &otel-common-env
+  # OTEL_SERVICE_NAMEはserviceごとに設定が必要
+  # Base
+  OTEL_SDK_DISABLED: "false"
+  OTEL_PHP_AUTOLOAD_ENABLED: "true"
+  OTEL_PROPAGATORS: baggage,tracecontext
+  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=dev,service.version=dummy
+  # Exporter
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: http://otel-collector:4318/v1/logs
+  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: http://otel-collector:4318/v1/metrics
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+  # Logs
+  OTEL_LOGS_EXPORTER: otlp
+  # Metrics
+  OTEL_METRICS_EXPORTER: otlp
+  OTEL_METRIC_EXPORT_INTERVAL: 5000
+  # Traces
+  OTEL_TRACES_EXPORTER: otlp
+  # Debug
+  # OTEL_LOG_LEVEL: debug
+
+services:
+  ##################################################
+  # Laravel - MySQL
+  ##################################################
+  laravel:
+    image: laravel-local-example:latest
+    build:
+      context: ./laravel
+    command: ./entrypoint.sh
+    environment:
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_DATABASE: laravel
+      DB_USERNAME: root
+      DB_PASSWORD: password
+      <<: [ *otel-common-env ]
+      OTEL_SERVICE_NAME: laravel-app
+    labels:
+      prometheus_target: laravel
+    ports:
+      - "8000:8000"
+      - "5173:5173"
+    restart: always
+    volumes:
+      - ./laravel:/opt/laravel
+    working_dir: /opt/laravel
+    depends_on:
+      - mysql
+
+  mysql:
+    image: mysql:8.0.44
+    command:
+      - "mysqld"
+      - "--sql-mode="
+    environment:
+      MYSQL_DATABASE: laravel
+      MYSQL_ROOT_PASSWORD: password
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "mysqladmin ping -ppassword | grep 'mysqld is alive'"
+      retries: 30
+      timeout: 2s
+    labels:
+      prometheus_target: mysql
+    restart: always
+    volumes:
+      - ./.local/mysql/data:/var/lib/mysql
+      - ./.local/mysql/log:/var/log/mysql
+
+  ##################################################
+  # Grafana (ダッシュボード)
+  ##################################################
+  grafana:
+    image: grafana/grafana:12.3.0
+    user: root
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: password
+    ports:
+      - "3000:3000"
+    restart: always
+    volumes:
+      - ./.local/grafana/data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+
+  ##################################################
+  # OTEL Collector (テレメトリデータの中継)
+  ##################################################
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    command:
+      - "--config=/etc/otelcol/config.yaml"
+    restart: always
+    volumes:
+      - ./otel/config.yaml:/etc/otelcol/config.yaml:ro
+    depends_on:
+      - loki
+      - prometheus
+      - tempo
+
+  ##################################################
+  # Loki (ログの保存)
+  ##################################################
+  loki:
+    image: grafana/loki:3.6.2
+    command:
+      - "-config.file=/etc/loki/loki-config.yaml"
+    ports:
+      - "3100:3100"
+    restart: always
+    volumes:
+      - ./.local/loki/data:/tmp/loki
+      - ./loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+
+  ##################################################
+  # Prometheus (メトリクスの保存)
+  ##################################################
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    user: root
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-remote-write-receiver"
+    ports:
+      - "9090:9090"
+    restart: always
+    volumes:
+      - ./.local/prometheus/data:/prometheus
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  ##################################################
+  # Tempo (トレースの保存)
+  ##################################################
+  tempo:
+    image: grafana/tempo:2.9.0
+    command:
+      - "-config.file=/etc/tempo.yaml"
+    restart: always
+    ports:
+      - "3200:3200"
+    volumes:
+      - ./.local/tempo/data:/tmp/tempo
+      - ./tempo/tempo.yaml:/etc/tempo.yaml:ro
