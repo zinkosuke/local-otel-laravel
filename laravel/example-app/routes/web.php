@@ -9,12 +9,14 @@ Route::group(['middleware' => [RequestTrace::class]], function () {
     });
     Route::get('/http', function () {
         \Log::info("Access to 'https://example.com'");
-        \Http::get("https://example.com");
+        \Http::get('https://example.com');
+
         return view('welcome');
     });
     Route::get('/db', function () {
         \Log::info("Run quey 'select now'");
-        \DB::select("select now() as n");
+        \DB::select('select now() as n');
+
         return view('welcome');
     });
 });

@@ -4,7 +4,6 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
-use OpenTelemetry\SDK\Metrics\MeterProviderFactory;
 use Symfony\Component\HttpFoundation\Response;
 
 class RequestTrace
@@ -16,14 +15,13 @@ class RequestTrace
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $requestStart = time();
-        $response = $next($request);
-        $requestFinished = time();
-        $provider = (new MeterProviderFactory())->create();
-        $meter = $provider->getMeter(config("app.name"));
-        $requestCounter = $meter->createCounter("http_request_count");
-        $requestCounter->add(1);
-        $provider->shutdown();
-        return $response;
+        return \Metrics::flushScope(function () use ($request, $next) {
+            \Metrics::increment('http_request_count', attributes: [
+                'uri' => \Route::getCurrentRoute() ? \Route::getCurrentRoute()->uri : null,
+            ]);
+            $response = $next($request);
+
+            return $response;
+        });
     }
 }
