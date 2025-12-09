@@ -2,7 +2,7 @@
 cd "$(dirname "${0}")/example-app" || exit 1
 
 # 準備 (毎度流れるのは大いなる無駄である see example-app/composer.json)
-composer run setup
+OTEL_SDK_DISABLED="true" OTEL_PHP_AUTOLOAD_ENABLED="false" composer run setup
 
 # .envのDB関連設定 渡ってきた環境変数で書き換える
 while IFS='=' read -r key dotenv_value; do
